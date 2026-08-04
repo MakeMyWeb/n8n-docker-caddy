@@ -1,8 +1,11 @@
-version: "3.7"
+# No `version:` key — obsolete since Compose v2, it only produces a warning.
+#
+# Every value that differs between hosts comes from .env (see .env.dist).
+# Nothing in this file should ever need editing on a server.
 
 services:
   caddy:
-    image: caddy:latest
+    image: caddy:${CADDY_IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -11,9 +14,9 @@ services:
       # Consumed by the {$VAR} substitutions in caddy_config/Caddyfile, which
       # Caddy expands itself when it parses the config — hence they must be in
       # this container's environment, not just in Compose's.
-      - DOMAIN_NAME=${DOMAIN_NAME}
-      - SUBDOMAIN=${SUBDOMAIN}
-      - SSL_EMAIL=${SSL_EMAIL}
+      DOMAIN_NAME: ${DOMAIN_NAME:?DOMAIN_NAME is required, see .env.dist}
+      SUBDOMAIN: ${SUBDOMAIN:-n8n}
+      SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required, see .env.dist}
     volumes:
       # TLS certificates and the ACME account key. Precious — back it up.
       - caddy_data:/data
@@ -26,52 +29,65 @@ services:
       # replaces the file with a new one, so the container would keep serving
       # the old config until forcibly recreated.
       - ./caddy_config:/etc/caddy:ro
+    depends_on:
+      - n8n
 
   postgres:
-    image: postgres:16
+    image: postgres:${POSTGRES_IMAGE_TAG:-16}
     restart: unless-stopped
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-n8n}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required, generate one with `make secret`}
+      POSTGRES_DB: ${POSTGRES_DB:-n8n}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
-      interval: 5s
+      # $$ defers expansion to the container's shell, so the credentials are not
+      # baked into the rendered Compose config.
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 30s
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n
-    restart: always
+    image: docker.n8n.io/n8nio/n8n:${N8N_IMAGE_TAG:-latest}
+    restart: unless-stopped
     ports:
-      - 5678:5678
+      # Loopback only: publicly, n8n is reachable through Caddy over HTTPS and
+      # nowhere else. Override with N8N_HOST_PORT in .env if needed.
+      - "${N8N_HOST_PORT:-127.0.0.1:5678}:5678"
     environment:
-      - N8N_HOST=${SUBDOMAIN}.${DOMAIN_NAME}
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=https
-      - NODE_ENV=production
-      - WEBHOOK_URL=https://${SUBDOMAIN}.${DOMAIN_NAME}/
-      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
-      - N8N_TRUST_PROXY=true
-      - NODE_OPTIONS="--dns-result-order=ipv4first"
-      - N8N_DATA_TABLES_MAX_SIZE_BYTES=${N8N_DATA_TABLES_MAX_SIZE_BYTES:-500000000}
-      - N8N_PROXY_HOPS=1
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
-      - DB_POSTGRESDB_USER=${POSTGRES_USER}
-      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      N8N_HOST: ${SUBDOMAIN:-n8n}.${DOMAIN_NAME:?DOMAIN_NAME is required, see .env.dist}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: https
+      NODE_ENV: production
+      WEBHOOK_URL: https://${SUBDOMAIN:-n8n}.${DOMAIN_NAME}/
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Europe/Paris}
+      TZ: ${GENERIC_TIMEZONE:-Europe/Paris}
+      N8N_TRUST_PROXY: "true"
+      N8N_PROXY_HOPS: 1
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      N8N_DATA_TABLES_MAX_SIZE_BYTES: ${N8N_DATA_TABLES_MAX_SIZE_BYTES:-500000000}
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-n8n}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required, generate one with `make secret`}
     volumes:
+      # Holds n8n's encryption key. A database dump without this volume cannot
+      # decrypt credentials — `make backup` saves both.
       - n8n_data:/home/node/.n8n
-      - ${DATA_FOLDER}/local_files:/files
+      - ${LOCAL_FILES_PATH:-./local_files}:/files
     depends_on:
       postgres:
         condition: service_healthy
 
 volumes:
+  # The three data volumes are external on purpose: Compose can neither create
+  # them empty by accident (which would silently start n8n on a blank database)
+  # nor delete them on `docker compose down -v`. `make init` creates them.
   caddy_data:
     external: true
   n8n_data:
