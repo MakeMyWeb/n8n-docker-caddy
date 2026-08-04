@@ -1,5 +1,21 @@
-n8n.<domain>.<suffix> {
-    reverse_proxy n8n:5678 {
-      flush_interval -1
-    }
+{
+	# Contact address for the Let's Encrypt account. The default only exists so
+	# that `caddy validate` passes on a bare checkout; scripts/preflight.sh
+	# rejects it at deploy time.
+	email {$SSL_EMAIL:admin@example.com}
+}
+
+# The site address is derived from SUBDOMAIN and DOMAIN_NAME, which the caddy
+# service receives from .env via docker-compose.yml. Nothing in this file needs
+# editing per host.
+#
+# With no variables set it resolves to n8n.localhost, for which Caddy uses its
+# internal CA — so a bare checkout starts and validates locally without ever
+# contacting Let's Encrypt.
+{$SUBDOMAIN:n8n}.{$DOMAIN_NAME:localhost} {
+	reverse_proxy n8n:5678 {
+		# REQUIRED: disables response buffering. n8n's editor streams execution
+		# output over SSE; removing this line breaks the live log view.
+		flush_interval -1
+	}
 }

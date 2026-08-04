@@ -7,10 +7,25 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # Consumed by the {$VAR} substitutions in caddy_config/Caddyfile, which
+      # Caddy expands itself when it parses the config — hence they must be in
+      # this container's environment, not just in Compose's.
+      - DOMAIN_NAME=${DOMAIN_NAME}
+      - SUBDOMAIN=${SUBDOMAIN}
+      - SSL_EMAIL=${SSL_EMAIL}
     volumes:
+      # TLS certificates and the ACME account key. Precious — back it up.
       - caddy_data:/data
-      - ${DATA_FOLDER}/caddy_config:/config
-      - ${DATA_FOLDER}/caddy_config/Caddyfile:/etc/caddy/Caddyfile
+      # Caddy's own autosave.json. Derived from the Caddyfile, disposable.
+      # A named volume rather than a bind mount, so the container cannot write
+      # root-owned files into the git working tree.
+      - caddy_config:/config
+      # Our Caddyfile, read-only. The whole directory is mounted rather than the
+      # single file: a bind mount of a file pins an inode, and `git pull`
+      # replaces the file with a new one, so the container would keep serving
+      # the old config until forcibly recreated.
+      - ./caddy_config:/etc/caddy:ro
 
   postgres:
     image: postgres:16
@@ -63,3 +78,5 @@ volumes:
     external: true
   postgres_data:
     external: true
+  # Disposable, so this one is a regular project-scoped volume.
+  caddy_config: {}
