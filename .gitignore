@@ -1,0 +1,24 @@
+# Local environment — contains POSTGRES_PASSWORD, never commit
+/.env
+/.env.local
+/.env.*.local
+
+# Host-specific Compose overrides
+docker-compose.override.yml
+compose.override.yml
+
+# Runtime state containers write inside the repo (root-owned)
+caddy_config/caddy/
+caddy_config/*.json
+
+# n8n shared files: data, not code
+local_files/*
+!local_files/.gitkeep
+
+# Backups
+backups/*
+!backups/.gitkeep
+*.sql
+*.sql.gz
+*.dump
+*.tgz
