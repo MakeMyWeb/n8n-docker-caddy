@@ -84,9 +84,13 @@ cd /srv/n8n/n8n-docker-caddy
 bash /path/to/migrate-existing-host.sh            # no sudo — see the note at the top
 ```
 
-Options: `--branch <name>` (default `postgres`), `--remote <url>` (default: the old checkout's
-`origin` — needed when that still points at `n8n-io/n8n-docker-caddy`, which has no such branch),
-`--no-cutover` to verify and stop, `--allow-root`.
+It clones from `https://github.com/MakeMyWeb/n8n-docker-caddy.git` by default — **not** from the old
+checkout's `origin`, which on a host this old is upstream's `n8n-io/n8n-docker-caddy` and carries none
+of this migration. https rather than SSH, so the clone needs no key at all.
+
+Options: `--branch <name>` (default `postgres`), `--remote <url>` to clone from somewhere else,
+`--from-origin` to use the old checkout's `origin` after all, `--no-cutover` to verify and stop,
+`--allow-root`.
 
 It reads the current state, takes a full backup outside the repo, clones the new revision into
 `../n8n-docker-caddy-next`, rebuilds `.env` from the old one plus `.env.dist` (dropping
@@ -259,12 +263,11 @@ backup — but nothing imports it.
 ```bash
 cd /srv/docker/n8n-docker-caddy
 docker compose up -d                       # the export needs n8n running
-bash /path/to/migrate-existing-host.sh --branch postgres \
-     --remote https://github.com/MakeMyWeb/n8n-docker-caddy.git
+bash /path/to/migrate-existing-host.sh
 ```
 
-`--remote` is worth passing explicitly here: a checkout this old usually still has upstream's
-`n8n-io/n8n-docker-caddy` as `origin`, which has no `postgres` branch.
+No `--remote` needed: the default already points at the fork, which is the whole reason it is not
+derived from the old checkout's `origin`.
 
 Compared with the Postgres case it additionally:
 

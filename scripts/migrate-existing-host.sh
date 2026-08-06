@@ -8,14 +8,16 @@
 #   cd /srv/n8n/n8n-docker-caddy
 #   bash /path/to/migrate-existing-host.sh
 #
-# sudo would drop the SSH agent forwarded for that user, so the git clone from
-# a git@github.com remote fails with 'Permission denied (publickey)'. Nothing
-# here needs root: /srv is owned by the deploy user and n8n runs as uid 1000.
+# Nothing here needs root: /srv is owned by the deploy user and n8n runs as uid
+# 1000. sudo would also drop the SSH agent forwarded for that user, breaking any
+# clone from a git@github.com remote with 'Permission denied (publickey)'.
 #
-# It never runs a git merge. It clones the new revision next to the current
-# checkout, carries the real .env across, verifies the result, and only then
-# offers to swap the directories. Every destructive step asks first, and it is
-# safe to re-run: each phase detects work already done.
+# It never runs a git merge. It clones the new revision — from this deployment's
+# canonical repository, NOT from the old checkout's origin, which on a host this
+# old is upstream's n8n-io/n8n-docker-caddy and carries none of the migration —
+# next to the current checkout, carries the real .env across, verifies the
+# result, and only then offers to swap the directories. Every destructive step
+# asks first, and it is safe to re-run: each phase detects work already done.
 #
 # Why not just `git pull`: our commit DELETES .env from the index, and .env is
 # locally modified with the only copy of the real database password. The pull
@@ -29,13 +31,20 @@
 # scripts/import-legacy-export.sh.
 set -uo pipefail
 
+# This deployment's canonical source, and the default: a checkout old enough to
+# need migrating usually still has upstream's n8n-io/n8n-docker-caddy as origin,
+# which carries none of this. https rather than SSH so the clone needs no key.
+FORK_REMOTE=https://github.com/MakeMyWeb/n8n-docker-caddy.git
+
 BRANCH=postgres
-REMOTE=
+REMOTE=$FORK_REMOTE
+REMOTE_SOURCE="this deployment's canonical repository"
+USE_ORIGIN=0
 ALLOW_ROOT=0
 DO_CUTOVER=1
 
 usage() {
-	cat <<'EOF'
+	cat <<EOF
 Usage: bash migrate-existing-host.sh [options]
 
 Run it from the deployed checkout, as the user that owns it.
@@ -43,9 +52,11 @@ Run it from the deployed checkout, as the user that owns it.
   --branch <name>   revision to deploy (default: postgres, this fork's
                     deployment branch — main is still upstream's pre-Postgres
                     revision and carries none of this)
-  --remote <url>    where to clone from (default: the old checkout's origin).
-                    Needed when origin still points at n8n-io/n8n-docker-caddy,
-                    which has no such branch.
+  --remote <url>    where to clone from. Default:
+                      $FORK_REMOTE
+  --from-origin     clone from this checkout's own 'origin' instead of the
+                    default above. Only useful for a host whose origin is
+                    already a repository carrying the migration.
   --allow-root      permit running as root, for a host where /srv really is
                     root-owned. Read the note at the top of this file first.
   --no-cutover      stop after verifying the new checkout, swap nothing.
@@ -56,13 +67,22 @@ EOF
 while [[ $# -gt 0 ]]; do
 	case $1 in
 		--branch) [[ ${2:-} ]] || { usage; exit 1; }; BRANCH=$2; shift 2 ;;
-		--remote) [[ ${2:-} ]] || { usage; exit 1; }; REMOTE=$2; shift 2 ;;
+		--remote)
+			[[ ${2:-} ]] || { usage; exit 1; }
+			REMOTE=$2; REMOTE_SOURCE="--remote"; shift 2 ;;
+		--from-origin) USE_ORIGIN=1; shift ;;
 		--allow-root) ALLOW_ROOT=1; shift ;;
 		--no-cutover) DO_CUTOVER=0; shift ;;
 		-h|--help) usage; exit 0 ;;
 		*) printf 'unknown option: %s\n\n' "$1" >&2; usage >&2; exit 1 ;;
 	esac
 done
+
+if [[ $USE_ORIGIN -eq 1 && $REMOTE_SOURCE == "--remote" ]]; then
+	printf 'pass either --remote or --from-origin, not both\n\n' >&2
+	usage >&2
+	exit 1
+fi
 
 OLD_DIR=$(pwd)
 PARENT=$(dirname "$OLD_DIR")
@@ -118,12 +138,20 @@ docker info >/dev/null 2>&1 \
 [[ -w $PARENT ]] || die "$PARENT is not writable by $(id -un): the backup, the new
   checkout and the final swap all happen there."
 
-if [[ -z $REMOTE ]]; then
-	REMOTE=$(git remote get-url origin 2>/dev/null) \
-		|| die "no 'origin' remote — pass --remote <url>"
+CHECKOUT_ORIGIN=$(git remote get-url origin 2>/dev/null) || CHECKOUT_ORIGIN=
+if [[ $USE_ORIGIN -eq 1 ]]; then
+	[[ -n $CHECKOUT_ORIGIN ]] || die "--from-origin, but this checkout has no 'origin' remote"
+	REMOTE=$CHECKOUT_ORIGIN
+	REMOTE_SOURCE="--from-origin"
 fi
-good "checkout: $OLD_DIR"
-good "origin:   $REMOTE"
+
+good "checkout:  $OLD_DIR"
+good "clone from: $REMOTE"
+note "           ($REMOTE_SOURCE)"
+if [[ -n $CHECKOUT_ORIGIN && $CHECKOUT_ORIGIN != "$REMOTE" ]]; then
+	note "this checkout's own origin is $CHECKOUT_ORIGIN"
+	note "— deliberately NOT used; it predates the migration. Override with --from-origin."
+fi
 
 # Checked here, before the backup: discovering a wrong remote after tarring a
 # multi-gigabyte volume wastes the operator's time for nothing.
@@ -135,12 +163,15 @@ elif ! grep -qE "refs/heads/$BRANCH\$" <<<"$REMOTE_HEADS"; then
 	die "branch '$BRANCH' does not exist on
     $REMOTE
   available there: $(grep -oE 'refs/heads/.*' <<<"$REMOTE_HEADS" | sed 's#refs/heads/##' | tr '\n' ' ')
-
-  A checkout this old usually still points at upstream's n8n-io/n8n-docker-caddy,
-  which carries none of this migration. Re-run with:
-    --remote https://github.com/MakeMyWeb/n8n-docker-caddy.git"
+$(if [[ $REMOTE_SOURCE == "--from-origin" ]]; then
+	printf '\n  That is this checkout'"'"'s own origin, which on a host this old is usually\n'
+	printf '  upstream'"'"'s n8n-io/n8n-docker-caddy and carries none of this migration.\n'
+	printf '  Drop --from-origin to use %s instead.' "$FORK_REMOTE"
 else
-	good "branch:   $BRANCH (present on that remote)"
+	printf '\n  Check --branch, or --remote if this is not the repository you deploy from.'
+fi)"
+else
+	good "branch:    $BRANCH (present on that remote)"
 fi
 
 [[ -f .env ]] || die ".env not found. Nothing to carry across; deploy a fresh checkout instead."
@@ -366,12 +397,10 @@ if [[ -d $NEW_DIR ]]; then
 else
 	confirm "Clone $REMOTE ($BRANCH) into $NEW_DIR?" || exit 0
 	git clone --branch "$BRANCH" "$REMOTE" "$NEW_DIR" || die "clone failed — read git's
-  message above; the two usual ones are:
-    'Remote branch $BRANCH not found'  -> wrong repository, pass
-        --remote https://github.com/MakeMyWeb/n8n-docker-caddy.git
-    'Permission denied (publickey)'    -> you are running as $(id -un); check
-        'ssh -T git@github.com', and do not use sudo (it drops the forwarded
-        agent). An https:// --remote also sidesteps SSH entirely."
+  message above. If it says 'Permission denied (publickey)': you are running as
+  $(id -un); check 'ssh -T git@github.com', and do not use sudo (it drops the
+  forwarded agent). The default remote is https precisely to avoid this, so an
+  SSH failure here means --remote or --from-origin pointed at an SSH URL."
 	good "cloned into $NEW_DIR"
 fi
 

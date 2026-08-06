@@ -13,7 +13,10 @@ acceptance criterion for any change here.
 
 `postgres` is the deployment branch of this fork, and nothing is merged into `main`: `main` is still
 upstream's pre-Postgres revision (`2f93c08`). Every clone command in this repo therefore carries
-`-b postgres`, and `scripts/migrate-existing-host.sh` defaults `--branch` to it.
+`-b postgres`, and `scripts/migrate-existing-host.sh` defaults `--branch` to it. That script also
+hardcodes the fork's https URL as its default remote instead of reading the old checkout's `origin`:
+a host predating the migration usually still points at `n8n-io/n8n-docker-caddy`, which has neither
+the branch nor the scripts. `--from-origin` opts back into the old behaviour.
 
 ## Architecture
 
