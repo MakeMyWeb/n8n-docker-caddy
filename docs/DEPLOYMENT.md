@@ -367,7 +367,7 @@ Three sections: the size of each volume, a breakdown of `n8n_data`, and the ten 
 
 | Path | What it is |
 | --- | --- |
-| `binaryData/` | Binary payloads of retained executions. Deleted only when the executions themselves are pruned. Normally the largest item. |
+| `storage/` (`binaryData/` before v3) | Binary payloads of retained executions. Deleted only when the executions themselves are pruned. Normally the largest item. n8n warns about the rename at start-up; it is a no-op here, because the mount is the parent directory `/home/node/.n8n`, not either of these paths. Set `N8N_MIGRATE_FS_STORAGE_PATH=true` once to move it early. |
 | `database.sqlite` | On a host migrated from SQLite: the old database, unused but still archived in every backup. `make disk` flags it. Deleting it is safe once you no longer want its history. |
 | `nodes/node_modules/` | Community nodes installed from the UI. |
 | `ssh/` | Keys generated for git-based workflows. |
@@ -404,6 +404,43 @@ Things to check on a migrated host:
   (`sudo ufw status`).
 - **New required keys** no longer arrive with `git pull` since `.env` is not versioned. Run
   `make env-check` after every pull.
+
+## Deprecation warnings at start-up
+
+n8n prints a block of these after an upgrade. They fall into two kinds, and only the first kind is
+this repository's business.
+
+**A variable this repo sets under an old name.** Fix it here, in `docker-compose.yml`. The only one so
+far was `WEBHOOK_URL`, now `N8N_WEBHOOK_URL`.
+
+**A default n8n intends to change in a future version** — currently
+`N8N_UNVERIFIED_PACKAGES_ENABLED` (`true` → `false`), `N8N_RUNNERS_TASK_TIMEOUT` (300 s → 60 s),
+`N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES` (2 GiB → 256 MiB),
+`N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES` (5000 → 1000). n8n is asking you to decide, per host, whether
+you depend on today's value. `docker-compose.yml` deliberately does **not** set them: freezing an
+upstream default in a tracked file would silently keep every host on the old behaviour forever.
+
+So it is a per-host decision, and per-host means `docker-compose.override.yml` — gitignored, merged by
+Compose with no extra flags:
+
+```yaml
+services:
+  n8n:
+    environment:
+      N8N_RUNNERS_TASK_TIMEOUT: 300        # long-running Code nodes
+      N8N_UNVERIFIED_PACKAGES_ENABLED: true # community nodes outside the verified list
+```
+
+Then `make up`, and check with `docker compose exec n8n printenv | grep N8N_RUNNERS`. Leave them alone
+and the host simply follows n8n's new defaults at the upgrade that changes them.
+
+Two more lines in that block need no action at all:
+
+- **`Failed to start Python task runner … Python 3 is missing`** — the image ships no Python, and
+  internal mode is a debugging facility anyway. It only matters if you run Python Code nodes, which
+  needs an external task runner, i.e. another service.
+- **`[license SDK] Skipping renewal on init: license cert is not initialized`** — no enterprise
+  licence key on this instance. Expected.
 
 ## Upgrades, afterwards
 

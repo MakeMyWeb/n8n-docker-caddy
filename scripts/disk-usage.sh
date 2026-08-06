@@ -36,10 +36,12 @@ if [[ -n $N8N_VOLUME ]] && docker volume inspect "$N8N_VOLUME" >/dev/null 2>&1; 
 		du -sh /src | sed "s#/src#TOTAL#"
 		du -sh /src/* 2>/dev/null | sort -h | sed "s#/src/#  #"
 		echo
-		if [ -d /src/binaryData ]; then
-			echo "binaryData files: $(find /src/binaryData -type f | wc -l)"
+		# binaryData is the pre-v3 name of this directory; storage is the new one.
+		for d in binaryData storage; do
+			[ -d "/src/$d" ] || continue
+			echo "$d files: $(find "/src/$d" -type f | wc -l)"
 			echo "  payloads of retained executions; removed only when those are pruned"
-		fi
+		done
 		if [ -f /src/database.sqlite ]; then
 			echo "database.sqlite is STILL PRESENT: $(du -h /src/database.sqlite | cut -f1)"
 			echo "  the pre-Postgres database. Unused by this stack, but included in"

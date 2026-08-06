@@ -62,7 +62,12 @@ services:
       N8N_PORT: 5678
       N8N_PROTOCOL: https
       NODE_ENV: production
-      WEBHOOK_URL: https://${SUBDOMAIN:-n8n}.${DOMAIN_NAME}/
+      # WEBHOOK_URL is the deprecated alias and makes n8n warn at every start.
+      # A pre-2.x n8n does not know this name; that only concerns the window of a
+      # legacy migration, where N8N_IMAGE_TAG is pinned to the old version and
+      # every imported workflow is still inactive. Pin an old version long-term
+      # and you want WEBHOOK_URL back, in docker-compose.override.yml.
+      N8N_WEBHOOK_URL: https://${SUBDOMAIN:-n8n}.${DOMAIN_NAME}/
       GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Europe/Paris}
       TZ: ${GENERIC_TIMEZONE:-Europe/Paris}
       N8N_TRUST_PROXY: "true"
