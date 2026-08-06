@@ -124,7 +124,24 @@ if [[ -z $REMOTE ]]; then
 fi
 good "checkout: $OLD_DIR"
 good "origin:   $REMOTE"
-good "branch:   $BRANCH"
+
+# Checked here, before the backup: discovering a wrong remote after tarring a
+# multi-gigabyte volume wastes the operator's time for nothing.
+if ! REMOTE_HEADS=$(git ls-remote --heads "$REMOTE" 2>&1); then
+	warn "could not list the branches of $REMOTE"
+	note "${REMOTE_HEADS%%$'\n'*}"
+	confirm "Continue anyway (the clone would fail later)?" || exit 0
+elif ! grep -qE "refs/heads/$BRANCH\$" <<<"$REMOTE_HEADS"; then
+	die "branch '$BRANCH' does not exist on
+    $REMOTE
+  available there: $(grep -oE 'refs/heads/.*' <<<"$REMOTE_HEADS" | sed 's#refs/heads/##' | tr '\n' ' ')
+
+  A checkout this old usually still points at upstream's n8n-io/n8n-docker-caddy,
+  which carries none of this migration. Re-run with:
+    --remote https://github.com/MakeMyWeb/n8n-docker-caddy.git"
+else
+	good "branch:   $BRANCH (present on that remote)"
+fi
 
 [[ -f .env ]] || die ".env not found. Nothing to carry across; deploy a fresh checkout instead."
 
@@ -348,10 +365,13 @@ if [[ -d $NEW_DIR ]]; then
 	good "updated to origin/$BRANCH"
 else
 	confirm "Clone $REMOTE ($BRANCH) into $NEW_DIR?" || exit 0
-	git clone --branch "$BRANCH" "$REMOTE" "$NEW_DIR" || die "clone failed.
-  If this is 'Permission denied (publickey)': you are running as $(id -un) —
-  check 'ssh -T git@github.com', and do not use sudo (it drops the forwarded
-  agent). Or pass --remote https://github.com/MakeMyWeb/n8n-docker-caddy.git"
+	git clone --branch "$BRANCH" "$REMOTE" "$NEW_DIR" || die "clone failed — read git's
+  message above; the two usual ones are:
+    'Remote branch $BRANCH not found'  -> wrong repository, pass
+        --remote https://github.com/MakeMyWeb/n8n-docker-caddy.git
+    'Permission denied (publickey)'    -> you are running as $(id -un); check
+        'ssh -T git@github.com', and do not use sudo (it drops the forwarded
+        agent). An https:// --remote also sidesteps SSH entirely."
 	good "cloned into $NEW_DIR"
 fi
 
