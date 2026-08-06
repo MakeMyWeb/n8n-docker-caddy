@@ -135,3 +135,8 @@ database password, which exists nowhere else. Use `scripts/migrate-existing-host
   encryption key — is reused as is. Execution history, users and variables do not survive.
 - **The import cannot be fully scripted:** n8n attaches imported items to the instance owner's
   personal project, and only the browser setup screen can create that owner. Hence the two phases.
+- **CLI-imported workflows need a `workflow_history` backfill**, which `import-legacy-export.sh` does.
+  Older `import:workflow` writes `workflow_entity.versionId` with no matching history row, and
+  `activeVersionId` has a foreign key onto it — so activating a workflow, or the
+  `ActivateExecuteWorkflowTriggerWorkflows` migration of a later `make upgrade`, fails. The migration
+  runs before n8n serves traffic, so it crash-loops. See `docs/DEPLOYMENT.md`.

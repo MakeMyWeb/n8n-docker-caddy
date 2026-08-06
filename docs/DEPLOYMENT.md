@@ -303,6 +303,52 @@ overrides the last one). Then:
 - **open one credential and confirm it shows its secret.** That single check proves the encryption key
   was reused correctly, and it is the one that matters.
 
+### Why the import backfills `workflow_history`
+
+The import runs on the version the export came from, and older n8n releases' `import:workflow` writes
+`workflow_entity.versionId` without the matching row in `workflow_history`. Nothing notices until
+something sets `workflow_entity.activeVersionId`, which is constrained by:
+
+```
+FOREIGN KEY ("activeVersionId") REFERENCES workflow_history("versionId") ON DELETE RESTRICT
+```
+
+Two things do exactly that: activating a workflow, and the
+`ActivateExecuteWorkflowTriggerWorkflows` migration of a later upgrade, which activates workflows
+holding an Execute Workflow Trigger or an Error Trigger. That migration runs **before** n8n serves
+traffic, so the failure mode is a crash loop:
+
+```
+ERROR: insert or update on table "workflow_entity" violates foreign key constraint
+DETAIL: Key (activeVersionId)=(…) is not present in table "workflow_history".
+Migration "ActivateExecuteWorkflowTriggerWorkflows…" failed
+n8n-1 exited with code 1 (restarting)
+```
+
+`import-legacy-export.sh` therefore inserts one history snapshot per current version, right after
+importing. Recent versions create those rows themselves, so it reports `backfilled 0` and changes
+nothing.
+
+**On a host imported before this backfill existed**, repair it with the stack half-up — `n8n` stopped
+so nothing writes, `postgres` running:
+
+```bash
+docker compose stop n8n
+docker compose exec -T postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f -' <<'SQL'
+BEGIN;
+INSERT INTO workflow_history ("versionId", "workflowId", authors, nodes, connections)
+SELECT w."versionId", w.id, 'legacy import backfill', w.nodes, w.connections
+FROM workflow_entity w
+WHERE w."versionId" IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM workflow_history h WHERE h."versionId" = w."versionId");
+COMMIT;
+SQL
+docker compose up -d n8n && make logs S=n8n
+```
+
+The migration then completes and n8n starts. Re-running the insert is a no-op.
+
 Rollback stays free right up to the import — the SQLite database is untouched inside `n8n_data`, so
 swapping the directories back and starting the old stack returns to the previous state. Once you have
 imported and started working in the new instance, going back means losing whatever you did there.

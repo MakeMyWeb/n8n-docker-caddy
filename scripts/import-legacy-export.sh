@@ -183,6 +183,44 @@ if [[ $W_FILES -gt 0 ]]; then
 		|| die "import:workflow failed — read the output above"
 fi
 
+# ------------------------------------------------- workflow history backfill
+#
+# This import deliberately runs on the version the export came from, and older
+# n8n releases' import:workflow writes workflow_entity.versionId WITHOUT the
+# matching row in workflow_history. Nothing notices until something sets
+# workflow_entity.activeVersionId, which is constrained by
+#
+#   FOREIGN KEY ("activeVersionId") REFERENCES workflow_history("versionId")
+#
+# Two things do exactly that: activating a workflow, and the
+# ActivateExecuteWorkflowTriggerWorkflows migration of a later upgrade — which
+# runs before n8n serves traffic, so the failure is a crash loop, and `make
+# upgrade` cannot roll it back. One snapshot per current version closes the gap.
+# Recent versions create these rows themselves, so this is then a no-op.
+
+step "Workflow history"
+
+read -r -d '' BACKFILL_SQL <<'SQL' || true
+INSERT INTO workflow_history ("versionId", "workflowId", authors, nodes, connections)
+SELECT w."versionId", w.id, 'legacy import backfill', w.nodes, w.connections
+FROM workflow_entity w
+WHERE w."versionId" IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM workflow_history h WHERE h."versionId" = w."versionId");
+SQL
+
+if BACKFILL_OUT=$(printf '%s' "$BACKFILL_SQL" | docker compose exec -T postgres sh -c \
+		'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -tA -f -' 2>&1); then
+	# psql answers "INSERT 0 <n>"
+	good "backfilled ${BACKFILL_OUT##* } missing workflow_history row(s)"
+	note "without them, activating an imported workflow — or the next upgrade's"
+	note "ActivateExecuteWorkflowTriggerWorkflows migration — fails on a foreign key"
+else
+	warn "could not backfill workflow_history"
+	note "${BACKFILL_OUT}"
+	note "activating an imported workflow may fail on the activeVersionId foreign"
+	note "key, and so may the next 'make upgrade'. Sort this out before upgrading."
+fi
+
 step "Result"
 
 W_AFTER=$(psql_value 'select count(*) from workflow_entity')
