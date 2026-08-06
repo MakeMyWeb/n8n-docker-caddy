@@ -69,6 +69,14 @@ services:
       N8N_PROXY_HOPS: 1
       NODE_OPTIONS: --dns-result-order=ipv4first
       N8N_DATA_TABLES_MAX_SIZE_BYTES: ${N8N_DATA_TABLES_MAX_SIZE_BYTES:-500000000}
+      # Execution retention. The defaults below are n8n's own, so leaving these
+      # keys out of .env changes nothing; see `make disk` before lowering them.
+      EXECUTIONS_DATA_PRUNE: ${EXECUTIONS_DATA_PRUNE:-true}
+      EXECUTIONS_DATA_MAX_AGE: ${EXECUTIONS_DATA_MAX_AGE:-336}
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: ${EXECUTIONS_DATA_PRUNE_MAX_COUNT:-10000}
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: ${EXECUTIONS_DATA_SAVE_ON_SUCCESS:-all}
+      EXECUTIONS_DATA_SAVE_ON_ERROR: ${EXECUTIONS_DATA_SAVE_ON_ERROR:-all}
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: ${EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS:-true}
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: 5432

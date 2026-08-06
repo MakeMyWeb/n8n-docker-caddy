@@ -25,7 +25,7 @@ Upstream tutorials for provisioning the host itself:
 ## Install
 
 ```bash
-git clone https://github.com/MakeMyWeb/n8n-docker-caddy.git
+git clone -b postgres https://github.com/MakeMyWeb/n8n-docker-caddy.git
 cd n8n-docker-caddy
 
 make init          # creates the data volumes and .env from .env.dist
@@ -36,6 +36,9 @@ make up            # runs preflight, then starts the stack
 make logs
 ```
 
+`postgres` is the deployment branch of this fork; `main` is still upstream's pre-Postgres revision, so
+a plain `git clone` would give you the wrong thing.
+
 `make up` refuses to start if anything is off: placeholders left in `.env`, a missing volume, ports
 80/443 taken, a DNS record that does not point here, an invalid Caddyfile. Run `make preflight` on
 its own to check without starting.
@@ -44,7 +47,8 @@ n8n is then served at `https://${SUBDOMAIN}.${DOMAIN_NAME}`.
 
 **Already running an older revision of this repo on a server?** Do not `git pull` — see
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The commit that untracked `.env` records a deletion, and
-resolving that the usual way destroys your database password.
+resolving that the usual way destroys your database password. A host old enough to still run n8n on
+SQLite is handled too, by exporting its workflows and credentials into the new Postgres database.
 
 ## Commands
 
@@ -59,6 +63,7 @@ Run `make` for the full list.
 | `make upgrade` | Back up, pull the latest images, recreate the containers |
 | `make backup` | Database dump **and** the `n8n_data` volume, into `backups/` |
 | `make restore FILE=backups/…` | Restore a backup |
+| `make disk` | Where the disk goes: volumes, `n8n_data`, largest tables |
 | `make psql` | psql shell on the database |
 | `make shell` | Shell inside the n8n container |
 | `make config` | Show the fully interpolated Compose config |
@@ -106,6 +111,10 @@ database dump on its own restores workflows whose credentials can never be decry
 `make upgrade` takes a backup before pulling anything.
 
 Test the restore path before you need it: `make restore FILE=backups/<timestamp>`.
+
+Backups grow with the execution history, not with the number of workflows: `make disk` breaks down the
+volumes, the contents of `n8n_data` and the largest tables. The `EXECUTIONS_DATA_*` keys in `.env.dist`
+are the retention knobs — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#disk-usage).
 
 ## Data and volumes
 

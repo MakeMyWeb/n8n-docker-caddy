@@ -16,7 +16,7 @@ BACKUP_DIR := backups
 S ?=
 
 .PHONY: help init secret preflight env-check config up down restart logs ps \
-        pull upgrade backup restore psql shell caddy-validate caddy-reload
+        pull upgrade backup restore disk psql shell caddy-validate caddy-reload
 
 help: ## Show this help
 	@echo "Usage: make <target>"
@@ -94,6 +94,9 @@ backup: ## Dump the database AND the n8n_data volume into backups/
 
 restore: ## Restore a backup: make restore FILE=backups/<timestamp>
 	@./scripts/restore.sh "$(FILE)"
+
+disk: ## Show where the disk goes (volumes, n8n_data, largest tables)
+	@./scripts/disk-usage.sh
 
 psql: ## Open a psql shell on the database
 	$(COMPOSE) exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'

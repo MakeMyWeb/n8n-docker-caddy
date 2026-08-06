@@ -11,6 +11,10 @@ Encrypt) and PostgreSQL for storage. Designed for cloud hosting on DigitalOcean,
 `.env`, which is gitignored. `git status` must stay clean on a running deployment — that is the
 acceptance criterion for any change here.
 
+`postgres` is the deployment branch of this fork, and nothing is merged into `main`: `main` is still
+upstream's pre-Postgres revision (`2f93c08`). Every clone command in this repo therefore carries
+`-b postgres`, and `scripts/migrate-existing-host.sh` defaults `--branch` to it.
+
 ## Architecture
 
 1. **Caddy** (`caddy:${CADDY_IMAGE_TAG:-latest}`) — HTTPS termination and certificate management
@@ -58,6 +62,7 @@ make logs S=n8n      # follow one service
 make upgrade         # backup -> docker compose pull -> up -d
 make backup          # database dump + n8n_data volume
 make restore FILE=backups/<timestamp>
+make disk            # volumes, n8n_data breakdown, largest tables
 make psql            # psql shell
 make caddy-reload    # apply a Caddyfile change with no downtime
 ```
@@ -98,6 +103,10 @@ and `${LOCAL_FILES_PATH:-./local_files}` at `/files`.
 - **Rotating `POSTGRES_PASSWORD` takes two steps.** The postgres image only applies the variable when
   initialising an empty data directory, so an existing deployment also needs
   `ALTER USER n8n WITH PASSWORD '…'`.
+- **The `EXECUTIONS_DATA_*` defaults in `docker-compose.yml` mirror n8n's own**, so an absent key in
+  `.env` changes nothing. Keep it that way: these govern how much history exists, and a `:-` default
+  that differs from n8n's would silently delete it. `make disk` is what to look at before touching
+  them.
 - **Never commit `.env`.** `scripts/preflight.sh` fails if it becomes tracked again.
 - Authentication is handled entirely by n8n; basic auth was removed upstream.
 - `make env-check` after every `git pull`: since `.env` is not versioned, new required keys arrive in
@@ -109,3 +118,17 @@ A host deployed before `.env` was untracked has `.env` and `caddy_config/Caddyfi
 `git pull` aborts there, and the reflex fix (`git checkout`/`restore`/`stash`/`reset`) destroys the
 database password, which exists nowhere else. Use `scripts/migrate-existing-host.sh`, or follow
 `docs/DEPLOYMENT.md` — never a plain pull.
+
+- **The migration scripts refuse to run as root**, and that is deliberate: `sudo` resolves git against
+  root's `~/.ssh` and drops the forwarded agent, so cloning an SSH remote fails. The deployment
+  directory belongs to the login user, which on a stock cloud image is already uid 1000 — n8n's uid.
+  `--allow-root` exists for a host where `/srv` really is root-owned.
+- **`local_files/` must be copied across at cutover.** It is gitignored, so a fresh clone has only
+  `.gitkeep` and `/files` would be empty inside n8n.
+- **A host predating the Postgres commit runs n8n on SQLite** (no `postgres` service; the database is
+  `database.sqlite` inside `n8n_data`). There is no SQLite-to-Postgres converter, so the migration
+  exports workflows and credentials with n8n's CLI and imports them into the fresh database with
+  `scripts/import-legacy-export.sh`. Credentials survive because `n8n_data` — and with it the
+  encryption key — is reused as is. Execution history, users and variables do not survive.
+- **The import cannot be fully scripted:** n8n attaches imported items to the instance owner's
+  personal project, and only the browser setup screen can create that owner. Hence the two phases.
