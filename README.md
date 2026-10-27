@@ -110,6 +110,12 @@ database dump on its own restores workflows whose credentials can never be decry
 
 `make upgrade` takes a backup before pulling anything.
 
+The Symbyoz console pulls a nightly copy to its secondary backups: it runs `scripts/backup.sh --archive`
+through SSH, which writes the same three files as a tar archive on stdout, and encrypts it on the console.
+Nothing is installed on the host apart from the public key of the console in `~/.ssh/authorized_keys`,
+restricted to that script (the line to add is on the backup host page of the console admin). To restore
+one: decrypt it, `tar xf` it into `backups/<name>/`, then `make restore FILE=backups/<name>`.
+
 Test the restore path before you need it: `make restore FILE=backups/<timestamp>`.
 
 Backups grow with the execution history, not with the number of workflows: `make disk` breaks down the

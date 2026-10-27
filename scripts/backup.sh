@@ -6,6 +6,10 @@
 #   n8n_data.tgz    the n8n_data volume
 #   env             a copy of .env
 #
+# With --archive, the three files are written as a tar archive on stdout instead of
+# backups/<timestamp>/ (messages go to stderr), e.g. streamed through SSH by the
+# Symbyoz console to the secondary backups. The temporary copy is removed on exit.
+#
 # The n8n_data volume is NOT optional. It holds n8n's encryption key
 # (/home/node/.n8n/config); restoring a database dump without it gives you back
 # workflows whose credentials can never be decrypted again.
@@ -13,8 +17,18 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
-STAMP=$(date +%Y%m%d-%H%M%S)
-DEST="backups/$STAMP"
+ARCHIVE=false
+if [ "${1:-}" = "--archive" ]; then
+	ARCHIVE=true
+	mkdir -p backups
+	DEST=$(mktemp -d backups/.archive.XXXXXX)
+	trap 'rm -rf "$DEST"' EXIT
+	# Keep stdout for the archive, every message goes to stderr
+	exec 3>&1 1>&2
+else
+	STAMP=$(date +%Y%m%d-%H%M%S)
+	DEST="backups/$STAMP"
+fi
 
 n8n_volume=$(docker compose config --format json \
 	| python3 -c 'import json,sys; print(json.load(sys.stdin)["volumes"]["n8n_data"]["name"])')
@@ -47,6 +61,11 @@ echo "  .env..."
 cp .env "$DEST/env"
 
 chmod 600 "$DEST/database.dump" "$DEST/env"
+
+if $ARCHIVE; then
+	tar cf - -C "$DEST" . >&3
+	exit 0
+fi
 
 echo
 du -sh "$DEST"
